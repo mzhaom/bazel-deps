@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -14,6 +15,7 @@ import com.google.common.collect.Sets;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.collection.DependencyCollectionException;
+import org.eclipse.aether.graph.DependencyNode;
 import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
@@ -26,6 +28,8 @@ public class BazelDeps {
 
   @Argument(usage = "<artifact id>")
   private List<String> artifactNames = new ArrayList<>();
+
+  private final Maven maven = new Maven();
 
   public static void main(String[] args) throws DependencyCollectionException, CmdLineException {
     new BazelDeps().doMain(args);
@@ -47,26 +51,34 @@ public class BazelDeps {
 
     System.err.println("Fetching dependencies from maven...\n");
 
-    Map<Artifact, Set<Artifact>> dependencies = fetchDependencies(artifactNames);
+    Map<Artifact, Set<DependencyNode>> dependencies = fetchDependencies(artifactNames);
 
-    Set<Artifact> excludeDependencies =
-      excludeArtifact != null ? Maven.transitiveDependencies(new DefaultArtifact(excludeArtifact))
-                              : ImmutableSet.of();
+    Set<Artifact> excludeDependencies = excludeArtifact != null ?
+        maven.transitiveDependencies(new DefaultArtifact(excludeArtifact))
+        .stream()
+        .map(DependencyNode::getArtifact)
+        .collect(Collectors.toSet())
+        : ImmutableSet.of();
 
+    /*
     printWorkspace(dependencies, excludeDependencies);
     printBuildEntries(dependencies, excludeDependencies);
+    */
+    
+    new LocalMirrorGenerator("third_party/java").generate(dependencies, excludeDependencies, maven);
   }
 
-  private Map<Artifact, Set<Artifact>> fetchDependencies(List<String> artifactNames) {
-    Map<Artifact, Set<Artifact>> dependencies = new HashMap<>();
+  private Map<Artifact, Set<DependencyNode>> fetchDependencies(List<String> artifactNames) {
+    Map<Artifact, Set<DependencyNode>> dependencies = new HashMap<>();
 
     artifactNames.stream()
       .map(DefaultArtifact::new)
-      .forEach(artifact -> dependencies.put(artifact, Maven.transitiveDependencies(artifact)));
+      .forEach(artifact -> dependencies.put(artifact, maven.transitiveDependencies(artifact)));
     return dependencies;
   }
 
-  private void printWorkspace(Map<Artifact, Set<Artifact>> dependencies,
+  /*
+  private void printWorkspace(Map<Artifact, Set<DependencyNode>> dependencies,
                               Set<Artifact> excludeDependencies) {
     System.out.println("\n\n--------- Add these lines to your WORKSPACE file ---------\n");
     dependencies.values().stream()
@@ -85,7 +97,7 @@ public class BazelDeps {
     dependencies.entrySet().stream()
       .sorted((e1, e2) -> e1.getKey().getArtifactId().compareTo(e2.getKey().getArtifactId()))
       .forEach(entry -> printForBuildFile(entry.getKey(), entry.getValue(), excludeDependencies));
-  }
+      }
 
   private static void printForBuildFile(Artifact artifact, Set<Artifact> dependencies,
                                         Set<Artifact> excludeDependencies) {
@@ -102,6 +114,7 @@ public class BazelDeps {
     System.out.println("  ],");
     System.out.println(")\n");
   }
+  */
 
   private static String artifactName(Artifact artifact) {
     return sanitizeName(artifact.getGroupId()) + "_" + sanitizeName(artifact.getArtifactId());
